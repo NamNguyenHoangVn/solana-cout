@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <title>Bộ Đếm Solana - Hoàng Nam</title>
+  <script src="https://unpkg.com/@solana/web3.js@1.95.3/lib/index.iife.min.js"></script>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+    .card { background: #1e293b; padding: 28px; border-radius: 16px; width: 460px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.4); }
+    h2 { margin-top: 0; color: #38bdf8; }
+    .counter-box { font-size: 64px; font-weight: bold; margin: 16px 0; color: #4ade80; }
+    button { background: #6366f1; color: white; border: none; padding: 11px 16px; border-radius: 8px; font-size: 14px; cursor: pointer; margin: 5px; font-weight: 600; }
+    button:hover { background: #4f46e5; }
+    button:disabled { background: #475569; cursor: not-allowed; }
+    .btn-secondary { background: #0ea5e9; }
+    .btn-secondary:hover { background: #0284c7; }
+    .status { margin-top: 16px; font-size: 13px; color: #cbd5e1; word-break: break-all; line-height: 1.5; text-align: left; background: #0f172a; padding: 12px; border-radius: 8px; }
+    a { color: #38bdf8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Solana Counter dApp</h2>
+    <div style="font-size: 12px; color: #94a3b8;">Program ID: Fubg1GAo83Yfq5HEwd4pmfs2RqbmdbHA8yUuiTu1ApZh</div>
+    <div class="counter-box" id="countDisplay">--</div>
+
+    <div>
+      <button class="btn-secondary" onclick="xinAirdrop()">Xin 0.5 SOL Devnet</button>
+      <button id="btnInit" onclick="khoiTao()">1. Khởi tạo (= 0)</button>
+      <button id="btnInc" onclick="tangLen()" disabled>2. Tăng lên (+1)</button>
+    </div>
+
+    <div class="status" id="status">Đang khởi tạo ví tạm trên trình duyệt...</div>
+  </div>
+
+  <script>
+    const web3 = window.solanaWeb3;
+    const connection = new web3.Connection("https://api.devnet.solana.com", "confirmed");
+
+    const PROGRAM_ID_STR = "Fubg1GAo83Yfq5HEwd4pmfs2RqbmdbHA8yUuiTu1ApZh".trim();
+    const programId = new web3.PublicKey(PROGRAM_ID_STR);
+
+    const payer = web3.Keypair.generate();
+    const counterAccount = web3.Keypair.generate();
+
+    function setStatus(html) {
+      document.getElementById("status").innerHTML = html;
+    }
+
+    async function capNhatSoDu() {
+      const lamports = await connection.getBalance(payer.publicKey);
+      return (lamports / web3.LAMPORTS_PER_SOL).toFixed(3);
+    }
+
+    async function xinAirdrop() {
+      setStatus("⏳ Đang xin 0.5 SOL cho ví tạm: <b>" + payer.publicKey.toBase58() + "</b>...");
+      try {
+        const sig = await connection.requestAirdrop(payer.publicKey, 0.5 * web3.LAMPORTS_PER_SOL);
+        const latestBlockhash = await connection.getLatestBlockhash();
+        await connection.confirmTransaction({ signature: sig, ...latestBlockhash });
+        const bal = await capNhatSoDu();
+        setStatus(`✅ Đã có <b>${bal} SOL</b>! Giờ bạn bấm <b>1. Khởi tạo (= 0)</b>.`);
+      } catch (e) {
+        setStatus(
+          `⚠️ Faucet tự động đang giới hạn lượt xin.<br>` +
+          `Bạn copy địa chỉ ví tạm này dán vào <a href="https://faucet.solana.com" target="_blank">faucet.solana.com</a> (chọn <b>Devnet</b>) để nhận 0.5 SOL:<br>` +
+          `<b>${payer.publicKey.toBase58()}</b>`
+        );
+      }
+    }
+
+    async function getDiscriminator(fnName) {
+      const msg = new TextEncoder().encode("global:" + fnName);
+      const buf = await crypto.subtle.digest("SHA-256", msg);
+      return new Uint8Array(buf).slice(0, 8);
+    }
+
+    async function docGiaTri() {
+      const accInfo = await connection.getAccountInfo(counterAccount.publicKey);
+      if (accInfo && accInfo.data && accInfo.data.length >= 16) {
+        const bytes = accInfo.data.slice(8, 16);
+        let value = 0n;
+        for (let i = 0; i < 8; i++) {
+          value += BigInt(bytes[i]) << BigInt(8 * i);
+        }
+        document.getElementById("countDisplay").innerText = value.toString();
+      }
+    }
+
+    async function khoiTao() {
+      setStatus("⏳ Đang gửi giao dịch <b>khoi_tao</b> lên Solana Devnet...");
+      try {
+        const data = await getDiscriminator("khoi_tao");
+        const instruction = new web3.TransactionInstruction({
+          programId: programId,
+          keys: [
+            { pubkey: counterAccount.publicKey, isSigner: true, isWritable: true },
+            { pubkey: payer.publicKey, isSigner: true, isWritable: true },
+            { pubkey: web3.SystemProgram.programId, isSigner: false, isWritable: false },
+          ],
+          data: data,
+        });
+
+        const tx = new web3.Transaction().add(instruction);
+        const sig = await web3.sendAndConfirmTransaction(connection, tx, [payer, counterAccount]);
+
+        await docGiaTri();
+        document.getElementById("btnInit").disabled = true;
+        document.getElementById("btnInc").disabled = false;
+
+        setStatus(
+          `✅ Khởi tạo thành công! Giá trị = 0.<br>` +
+          `<a href="https://explorer.solana.com/tx/${sig}?cluster=devnet" target="_blank">Xem giao dịch trên Solana Explorer</a>`
+        );
+      } catch (err) {
+        setStatus("❌ Chi tiết lỗi: " + (err && err.message ? err.message : String(err)));
+      }
+    }
+
+    async function tangLen() {
+      setStatus("⏳ Đang gửi giao dịch <b>tang_len</b> (+1) lên Solana Devnet...");
+      try {
+        const data = await getDiscriminator("tang_len");
+        const instruction = new web3.TransactionInstruction({
+          programId: programId,
+          keys: [
+            { pubkey: counterAccount.publicKey, isSigner: false, isWritable: true },
+          ],
+          data: data,
+        });
+
+        const tx = new web3.Transaction().add(instruction);
+        const sig = await web3.sendAndConfirmTransaction(connection, tx, [payer]);
+
+        await docGiaTri();
+        setStatus(
+          `✅ Đã tăng +1 thành công!<br>` +
+          `<a href="https://explorer.solana.com/tx/${sig}?cluster=devnet" target="_blank">Xem giao dịch trên Solana Explorer</a>`
+        );
+      } catch (err) {
+        setStatus("❌ Chi tiết lỗi: " + (err && err.message ? err.message : String(err)));
+      }
+    }
+
+    xinAirdrop();
+  </script>
+</body>
+</html>
